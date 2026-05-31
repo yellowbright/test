@@ -1,21 +1,46 @@
+# =====================================================
+# CI/CD：检测 → 构建镜像（app + web）→ 推送 GHCR
+# =====================================================
+# 触发规则：全部由手动触发（workflow_dispatch），按勾选参数执行
+#   · run_check   = true  → 依赖校验 + 代码风格检查（默认勾选）
+#   · build_amd64 = true  → 构建 linux/amd64（ubuntu-latest，原生）
+#   · build_arm64 = true  → 构建 linux/arm64（ubuntu-24.04-arm，原生）
+#   · amd64/arm64 都勾选   → 并行构建后合并成多架构 manifest
+#   · 三个都不勾           → 空跑（建议至少勾一项）
+#
+# 每次构建两个镜像（同一份代码、两个 target）：
+#   · ghcr.io/<repo>-app  ← target=app（php-fpm）
+#   · ghcr.io/<repo>-web  ← target=web（nginx）
+# =====================================================
+
 name: CI
 
-# - push / PR：自动跑检测（依赖校验 + 代码风格）
-# - 手动触发(workflow_dispatch)：构建并推送镜像到 GHCR（在 Actions 页点 Run workflow）
 on:
-  push:
-    branches: [main, master]
-  pull_request:
   workflow_dispatch:
     inputs:
-      push_image:
-        description: "是否构建并推送镜像到 GHCR"
+      run_check:
+        description: '依赖校验 + 代码风格检查'
         type: boolean
         default: true
+      build_amd64:
+        description: '构建 linux/amd64 镜像（x86 服务器用）'
+        type: boolean
+        default: false
+      build_arm64:
+        description: '构建 linux/arm64 镜像（甲骨文云 Ampere 等 ARM 服务器用）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
+  # ─────────────────────────────────────────────────
+  # Job 1: 检测（依赖 + 代码风格）
+  # ─────────────────────────────────────────────────
   check:
     name: 检测（依赖 + 代码风格）
+    if: inputs.run_check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,46 +60,189 @@ jobs:
       - name: 代码风格检查（Pint）
         run: ./vendor/bin/pint --test
 
-  build-and-push:
-    name: 构建并推送镜像
+  # ─────────────────────────────────────────────────
+  # Job 2a: 构建 linux/amd64 镜像（原生 x86 runner，速度快）
+  # 同时构建 app / web 两个 target，by-digest 推送（不打 tag）
+  # ─────────────────────────────────────────────────
+  build-amd64:
+    name: 构建 amd64 镜像（${{ matrix.target }}）
     needs: check
-    # 仅手动触发且勾选 push_image 时执行
-    if: github.event_name == 'workflow_dispatch' && inputs.push_image
+    # 即使 check 被 skip 也允许构建；仅当 check 真正失败时阻止
+    if: |
+      always() &&
+      inputs.build_amd64 &&
+      (needs.check.result == 'success' || needs.check.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    env:
-      REGISTRY: ghcr.io
-      IMAGE_BASE: ghcr.io/${{ github.repository }}
+    strategy:
+      matrix:
+        target: [app, web]
     steps:
-      - uses: actions/checkout@v4
+      - name: 拉取代码
+        uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - name: 生成镜像名（强制小写，GHCR 要求）
+        id: meta
+        run: |
+          IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')-${{ matrix.target }}"
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+          echo "镜像名: $IMAGE"
 
-      - name: 登录 GHCR
+      - name: 登录 GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 构建并推送 app（php-fpm）镜像
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: app
-          push: true
-          tags: |
-            ${{ env.IMAGE_BASE }}-app:latest
-            ${{ env.IMAGE_BASE }}-app:${{ github.sha }}
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: 构建并推送 web（nginx）镜像
+      - name: 构建并推送 ${{ matrix.target }} 镜像（by-digest）
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          target: web
-          push: true
-          tags: |
-            ${{ env.IMAGE_BASE }}-web:latest
-            ${{ env.IMAGE_BASE }}-web:${{ github.sha }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          # by-digest 方式推送：只生成 digest，不打 tag，由 merge job 统一打
+          outputs: type=image,name=${{ steps.meta.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          # 按平台 + target 分开缓存，避免互相污染
+          cache-from: type=gha,scope=amd64-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=amd64-${{ matrix.target }}
+
+      - name: 导出 digest 到工件
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: 上传 digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.target }}-amd64
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────
+  # Job 2b: 构建 linux/arm64 镜像（原生 ARM runner，速度快）
+  # 用 ubuntu-24.04-arm，比 QEMU 模拟快 5-10 倍
+  # ─────────────────────────────────────────────────
+  build-arm64:
+    name: 构建 arm64 镜像（${{ matrix.target }}）
+    needs: check
+    if: |
+      always() &&
+      inputs.build_arm64 &&
+      (needs.check.result == 'success' || needs.check.result == 'skipped')
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        target: [app, web]
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 生成镜像名（强制小写，GHCR 要求）
+        id: meta
+        run: |
+          IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')-${{ matrix.target }}"
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+          echo "镜像名: $IMAGE"
+
+      - name: 登录 GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 构建并推送 ${{ matrix.target }} 镜像（by-digest）
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/arm64
+          outputs: type=image,name=${{ steps.meta.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=arm64-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=arm64-${{ matrix.target }}
+
+      - name: 导出 digest 到工件
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: 上传 digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.target }}-arm64
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────
+  # Job 3: 合并 manifest 并打 tag（app / web 各一个）
+  # 只要 amd64 / arm64 任一构建成功就执行：
+  #   - 只构建 1 个平台 → 单平台 manifest
+  #   - 两个都构建      → 多平台 manifest
+  # ─────────────────────────────────────────────────
+  merge:
+    name: 合并 manifest 并打 tag（${{ matrix.target }}）
+    needs: [build-amd64, build-arm64]
+    if: |
+      always() &&
+      (needs.build-amd64.result == 'success' || needs.build-arm64.result == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        target: [app, web]
+    steps:
+      - name: 生成镜像名（强制小写，GHCR 要求）
+        id: meta
+        run: |
+          IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')-${{ matrix.target }}"
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+
+      - name: 下载该镜像的所有 digest 工件
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.target }}-*
+          merge-multiple: true
+
+      - name: 登录 GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 创建 manifest 并打 tag
+        working-directory: /tmp/digests
+        run: |
+          IMAGE="${{ steps.meta.outputs.image }}"
+          docker buildx imagetools create \
+            -t "$IMAGE:latest" \
+            -t "$IMAGE:${{ github.sha }}" \
+            $(printf "$IMAGE@sha256:%s " *)
+
+      - name: 输出最终镜像信息
+        run: |
+          docker buildx imagetools inspect "${{ steps.meta.outputs.image }}:latest"
