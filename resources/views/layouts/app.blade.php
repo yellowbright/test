@@ -8,6 +8,7 @@
     <meta name="description" content="@yield('meta_description', config('app.name').' 提供软件工程、人工智能与数字化转型服务。')">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="stylesheet" href="{{ asset('css/style.css') }}">
+    @stack('head')
 </head>
 <body>
 <header class="site-header" id="siteHeader">
@@ -26,6 +27,7 @@
             <a href="{{ route('services') }}" class="{{ request()->routeIs('services') ? 'active' : '' }}">服务</a>
             <a href="{{ route('about') }}" class="{{ request()->routeIs('about') ? 'active' : '' }}">关于我们</a>
             <a href="{{ route('contact') }}" class="{{ request()->routeIs('contact') ? 'active' : '' }}">联系我们</a>
+            <a href="{{ route('festival') }}" class="{{ request()->routeIs('festival') ? 'active' : '' }}">节日提醒</a>
             <a href="{{ route('contact') }}" class="btn btn-primary nav-cta">免费咨询</a>
         </nav>
     </div>

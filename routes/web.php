@@ -9,3 +9,5 @@ Route::view('/about', 'pages.about')->name('about');
 Route::view('/contact', 'pages.contact')->name('contact');
 
 Route::post('/contact', [ContactController::class, 'store'])->name('contact.store');
+
+Route::view('/festival', 'pages.festival')->name('festival');

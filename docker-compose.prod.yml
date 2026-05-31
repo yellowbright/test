@@ -52,6 +52,66 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - nexora-network
+
+  redis:
+    image: redis:alpine
+    container_name: nexora-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - nexora-network
+
+  queue:
+    image: ${REGISTRY_IMAGE_APP:-nexora-app:latest}
+    container_name: nexora-queue
+    restart: unless-stopped
+    command: php artisan queue:work redis --tries=3 --sleep=3
+    volumes:
+      - app-storage:/var/www/html/storage
+      - ./.env:/var/www/html/.env:ro
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - DB_HOST=${DB_HOST:-mysql}
+      - DB_PORT=${DB_PORT:-3306}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - nexora-network
+
+  scheduler:
+    image: ${REGISTRY_IMAGE_APP:-nexora-app:latest}
+    container_name: nexora-scheduler
+    restart: unless-stopped
+    command: php artisan schedule:work
+    volumes:
+      - app-storage:/var/www/html/storage
+      - ./.env:/var/www/html/.env:ro
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - DB_HOST=${DB_HOST:-mysql}
+      - DB_PORT=${DB_PORT:-3306}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - nexora-network
 
@@ -89,4 +149,6 @@ volumes:
   mysql-data:
     driver: local
   app-storage:
+    driver: local
+  redis-data:
     driver: local

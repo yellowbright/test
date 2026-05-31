@@ -1,0 +1,86 @@
+:root {
+  --j-primary: #3b82f6;
+  --j-bg: #f8fafc;
+  --j-surface: #ffffff;
+  --j-text: #0f172a;
+  --j-muted: #64748b;
+  --j-success: #10b981;
+  --j-warning: #f59e0b;
+  --j-error: #ef4444;
+  --j-border: #e2e8f0;
+  --j-radius-sm: 8px;
+  --j-radius-md: 12px;
+  --j-radius-lg: 16px;
+  --j-shadow-sm: 0 1px 2px rgb(15 23 42 / 0.06);
+  --j-shadow-md: 0 4px 12px rgb(15 23 42 / 0.08);
+  --j-shadow-lg: 0 12px 40px rgb(15 23 42 / 0.12);
+  --j-transition-fast: 180ms ease-out;
+  --j-transition-panel: 220ms ease-out;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  color: var(--j-text);
+  background: var(--j-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+}
+
+#app {
+  min-height: 100dvh;
+}
+
+/* FullCalendar 与主题对齐 */
+.fc {
+  --fc-border-color: var(--j-border);
+  --fc-button-bg-color: var(--j-primary);
+  --fc-button-border-color: var(--j-primary);
+  --fc-button-hover-bg-color: #2563eb;
+  --fc-button-hover-border-color: #2563eb;
+  --fc-button-active-bg-color: #1d4ed8;
+  --fc-today-bg-color: rgb(59 130 246 / 0.08);
+  font-family: inherit;
+}
+
+.fc .fc-toolbar-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--j-text);
+}
+
+.fc-daygrid-day.fc-day-jieri-selected .fc-daygrid-day-frame {
+  background: var(--j-primary);
+  color: #fff;
+  border-radius: var(--j-radius-sm);
+  transition: transform var(--j-transition-fast);
+}
+
+.fc-daygrid-day.fc-day-jieri-today:not(.fc-day-jieri-selected) .fc-daygrid-day-frame {
+  box-shadow: inset 0 0 0 2px var(--j-primary);
+  border-radius: var(--j-radius-sm);
+}
+
+.fc-daygrid-day.fc-day-jieri-reminder:not(.fc-day-jieri-selected) .fc-daygrid-day-number::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--j-warning);
+}
+
+.fc-daygrid-day-number {
+  position: relative;
+}
