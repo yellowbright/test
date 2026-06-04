@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\FestivalPresetController;
 use App\Http\Controllers\Api\ReminderController;
+use App\Http\Controllers\Api\WaifuController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/auth/send-code', [AuthController::class, 'sendCode']);
@@ -11,6 +12,9 @@ Route::post('/auth/reset-password', [AuthController::class, 'resetPassword']);
 Route::post('/login', [AuthController::class, 'login']);
 
 Route::get('/festival-presets', [FestivalPresetController::class, 'index']);
+
+Route::get('/waifu/status', [WaifuController::class, 'status']);
+Route::post('/waifu/ask', [WaifuController::class, 'ask']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);

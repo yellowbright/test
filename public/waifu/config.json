@@ -1,0 +1,21 @@
+{
+  "model": {
+    "name": "Pio",
+    "path": "/waifu/model/Pio/index.json"
+  },
+  "messages": {
+    "welcome": "你好呀～点我一下，就能问我问题哦！",
+    "thinking": "让我想想……",
+    "error": "呜，我连不上大脑了，稍后再试试吧～",
+    "empty": "你还没有说话呢～",
+    "idle": [
+      "在发呆吗？点我聊聊天吧～",
+      "有什么想问我的吗？",
+      "今天也要元气满满哦！"
+    ]
+  },
+  "ai": {
+    "statusUrl": "/api/waifu/status",
+    "askUrl": "/api/waifu/ask"
+  }
+}
